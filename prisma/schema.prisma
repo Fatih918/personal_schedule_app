@@ -1,0 +1,146 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TimeMode {
+  TIMED
+  UNTIMED
+}
+
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  CANCELLED
+}
+
+enum OccurrenceStatus {
+  PENDING
+  COMPLETED
+  SKIPPED
+  CANCELLED
+}
+
+enum RecurrenceType {
+  DAILY
+  SELECTED_WEEKDAYS
+  WEEKLY_INTERVAL
+}
+
+model AppUser {
+  id                  String               @id @db.Uuid
+  email               String               @unique @db.VarChar(320)
+  passwordHash        String?              @map("password_hash") @db.VarChar(255)
+  googleSubject       String?              @unique @map("google_subject") @db.VarChar(255)
+  timezone            String               @default("Asia/Jakarta")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  categories          Category[]
+  scheduleDefinitions ScheduleDefinition[]
+  dailyPlans          DailyPlan[]
+
+  @@map("app_user")
+}
+
+model Category {
+  id          String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String               @map("user_id") @db.Uuid
+  name        String
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  archivedAt  DateTime?            @map("archived_at") @db.Timestamptz(6)
+  user        AppUser              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  definitions ScheduleDefinition[]
+
+  @@unique([userId, id], map: "category_user_id_id_unique")
+  @@index([userId])
+  @@map("category")
+}
+
+model ScheduleDefinition {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  categoryId  String?      @map("category_id") @db.Uuid
+  title       String
+  description String?
+  timeMode    TimeMode     @map("time_mode")
+  startTime   DateTime?    @map("start_time") @db.Time(6)
+  endTime     DateTime?    @map("end_time") @db.Time(6)
+  isEnabled   Boolean      @default(true) @map("is_enabled")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt  DateTime?    @map("archived_at") @db.Timestamptz(6)
+  user        AppUser      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  rules       ScheduleRule[]
+  occurrences ActivityOccurrence[]
+
+  @@unique([userId, id], map: "schedule_user_id_id_unique")
+  @@index([userId, isEnabled, updatedAt(sort: Desc)])
+  @@map("schedule_definition")
+}
+
+model ScheduleRule {
+  id                    String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scheduleDefinitionId  String          @map("schedule_definition_id") @db.Uuid
+  recurrenceType        RecurrenceType  @map("recurrence_type")
+  intervalWeeks         Int             @default(1) @map("interval_weeks")
+  weekdays              Int[]           @default([]) @db.SmallInt
+  effectiveStartDate    DateTime        @map("effective_start_date") @db.Date
+  effectiveEndDate      DateTime?       @map("effective_end_date") @db.Date
+  anchorDate            DateTime        @map("anchor_date") @db.Date
+  isEnabled             Boolean         @default(true) @map("is_enabled")
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  definition            ScheduleDefinition @relation(fields: [scheduleDefinitionId], references: [id], onDelete: Cascade)
+  occurrences           ActivityOccurrence[]
+
+  @@index([scheduleDefinitionId, isEnabled])
+  @@map("schedule_rule")
+}
+
+model DailyPlan {
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String               @map("user_id") @db.Uuid
+  planDate     DateTime             @map("plan_date") @db.Date
+  status       PlanStatus            @default(DRAFT)
+  activatedAt  DateTime?            @map("activated_at") @db.Timestamptz(6)
+  createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user         AppUser              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  occurrences  ActivityOccurrence[]
+
+  @@unique([userId, id], map: "daily_plan_user_id_id_unique")
+  @@index([userId, planDate(sort: Desc)])
+  @@map("daily_plan")
+}
+
+model ActivityOccurrence {
+  id                     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dailyPlanId            String            @map("daily_plan_id") @db.Uuid
+  scheduleDefinitionId   String?           @map("schedule_definition_id") @db.Uuid
+  scheduleRuleId         String?           @map("schedule_rule_id") @db.Uuid
+  generationKey           String?           @map("generation_key")
+  snapshot                Json              @default("{}") @db.JsonB
+  titleSnapshot           String            @map("title_snapshot")
+  categoryNameSnapshot    String?           @map("category_name_snapshot")
+  timeMode                TimeMode          @map("time_mode")
+  plannedStartLocal       DateTime?         @map("planned_start_local") @db.Time(6)
+  plannedEndLocal         DateTime?         @map("planned_end_local") @db.Time(6)
+  timezoneSnapshot        String            @map("timezone_snapshot")
+  status                  OccurrenceStatus  @default(PENDING)
+  actualDurationMinutes   Int?              @map("actual_duration_minutes")
+  completedAt             DateTime?         @map("completed_at") @db.Timestamptz(6)
+  sortOrder               Int               @default(0) @map("sort_order")
+  createdAt               DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  plan                    DailyPlan         @relation(fields: [dailyPlanId], references: [id], onDelete: Cascade)
+  definition              ScheduleDefinition? @relation(fields: [scheduleDefinitionId], references: [id], onDelete: SetNull)
+  rule                    ScheduleRule?     @relation(fields: [scheduleRuleId], references: [id], onDelete: SetNull)
+
+  @@index([dailyPlanId, status])
+  @@index([scheduleDefinitionId])
+  @@map("activity_occurrence")
+}
