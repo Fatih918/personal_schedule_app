@@ -20,8 +20,7 @@ export async function fetchCached<T>(
   if (pending) return pending as Promise<T>;
 
   const generation = generations.get(key) ?? 0;
-  let request: Promise<T>;
-  request = loader()
+  const request = loader()
     .then((value) => {
       // Do not let a request started before invalidation repopulate stale data.
       if ((generations.get(key) ?? 0) === generation) {
