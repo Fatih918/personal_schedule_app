@@ -229,13 +229,54 @@ export default function HomePage() {
   }
 
   async function updateActivity(activityId: string, action: "complete" | "skip") {
-    setDailyBusy(true); setMessage("");
+    const previousPlan = dailyPlan;
+    const optimisticStatus: Activity["status"] = action === "complete" ? "COMPLETED" : "SKIPPED";
+
+    // Update the visible row immediately; restore the previous snapshot if the API rejects it.
+    setDailyBusy(true);
+    setMessage("");
+    setDailyPlan((current) => current ? {
+      ...current,
+      occurrences: current.occurrences.map((activity) =>
+        activity.id === activityId && activity.status === "PENDING"
+          ? { ...activity, status: optimisticStatus }
+          : activity,
+      ),
+    } : current);
+
     try {
-      const response = await fetch(`/api/activities/${activityId}/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: action === "complete" ? JSON.stringify({}) : undefined });
+      const response = await fetch(`/api/activities/${activityId}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: action === "complete" ? JSON.stringify({}) : undefined,
+      });
       if (!response.ok) throw new Error(await readError(response));
-      await loadDailyPlan(); setMessage(action === "complete" ? "Aktivitas ditandai selesai." : "Aktivitas dilewati.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Gagal memperbarui aktivitas."); }
-    finally { setDailyBusy(false); }
+
+      const body = await response.json() as {
+        activity?: { id: string; status: Activity["status"]; actualDurationMinutes: number | null };
+      };
+      // The mutation response is authoritative, so there is no need to refetch the entire plan.
+      setDailyPlan((current) => current ? {
+        ...current,
+        occurrences: current.occurrences.map((activity) =>
+          activity.id === activityId
+            ? {
+                ...activity,
+                status: body.activity?.status ?? optimisticStatus,
+                actualDurationMinutes: body.activity?.actualDurationMinutes ?? activity.actualDurationMinutes,
+              }
+            : activity,
+        ),
+      } : current);
+      setMessage(action === "complete" ? "Aktivitas ditandai selesai." : "Aktivitas dilewati.");
+    } catch (error) {
+      // Roll back only this failed mutation. The current UI is disabled during the request,
+      // so another activity mutation cannot overwrite this snapshot concurrently.
+      setDailyPlan(previousPlan);
+      setMessage(error instanceof Error ? error.message : "Gagal memperbarui aktivitas.");
+    } finally {
+      setDailyBusy(false);
+    }
   }
 
   async function loadAnalytics(period: "week" | "month" = analyticsPeriod) {
