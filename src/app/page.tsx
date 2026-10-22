@@ -194,11 +194,18 @@ export default function HomePage() {
     catch (error) { setMessage(error instanceof Error ? error.message : "Gagal mengarsipkan jadwal."); } finally { setBusy(false); }
   }
 
+  function invalidateActivityViews() {
+    if (!user) return;
+    invalidateCached(`user:${user.id}:analytics:`);
+    invalidateCached(`user:${user.id}:history:`);
+  }
+
   async function createDailyPlan() {
     setDailyBusy(true); setMessage("");
     try {
       const response = await fetch("/api/daily-plans", { method: "POST" });
       if (!response.ok) throw new Error(await readError(response));
+      invalidateActivityViews();
       await loadDailyPlan(); setMessage("Daily Plan berhasil dibuat dari snapshot jadwal hari ini.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Gagal membuat Daily Plan."); }
     finally { setDailyBusy(false); }
@@ -210,6 +217,7 @@ export default function HomePage() {
     try {
       const response = await fetch(`/api/daily-plans/${dailyPlan.id}/activate`, { method: "POST" });
       if (!response.ok) throw new Error(await readError(response));
+      invalidateActivityViews();
       await loadDailyPlan(); setMessage("Daily Plan berhasil diaktifkan.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Gagal mengaktifkan Daily Plan."); }
     finally { setDailyBusy(false); }
@@ -223,6 +231,7 @@ export default function HomePage() {
     try {
       const response = await fetch(`/api/daily-plans/${dailyPlan.id}/cancel`, { method: "POST" });
       if (!response.ok) throw new Error(await readError(response));
+      invalidateActivityViews();
       await loadDailyPlan();
       setMessage("Daily Plan dibatalkan. Perbaiki definisi jadwal terlebih dahulu, lalu buat plan pengganti.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Gagal membatalkan Daily Plan."); }
@@ -269,8 +278,7 @@ export default function HomePage() {
             : activity,
         ),
       } : current);
-      invalidateCached(`user:${user.id}:analytics:`);
-      invalidateCached(`user:${user.id}:history:`);
+      invalidateActivityViews();
       setMessage(action === "complete" ? "Aktivitas ditandai selesai." : "Aktivitas dilewati.");
     } catch (error) {
       // Roll back only this failed mutation. The current UI is disabled during the request,
