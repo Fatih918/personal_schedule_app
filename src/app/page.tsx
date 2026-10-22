@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { signIn, signOut } from "next-auth/react";
+import { fetchCached, invalidateCached } from "@/shared/client/request-cache";
 
 type User = { id: string; email: string };
 type RecurrenceType = "DAILY" | "SELECTED_WEEKDAYS" | "WEEKLY_INTERVAL";
@@ -268,6 +269,8 @@ export default function HomePage() {
             : activity,
         ),
       } : current);
+      invalidateCached(`user:${user.id}:analytics:`);
+      invalidateCached(`user:${user.id}:history:`);
       setMessage(action === "complete" ? "Aktivitas ditandai selesai." : "Aktivitas dilewati.");
     } catch (error) {
       // Roll back only this failed mutation. The current UI is disabled during the request,
@@ -280,24 +283,33 @@ export default function HomePage() {
   }
 
   async function loadAnalytics(period: "week" | "month" = analyticsPeriod) {
+    if (!user) return;
     setAnalyticsBusy(true); setMessage("");
     try {
-      const response = await fetch(`/api/analytics?period=${period}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(await readError(response));
-      setAnalytics(await response.json() as AnalyticsData);
+      const result = await fetchCached<AnalyticsData>(`user:${user.id}:analytics:${period}`, async () => {
+        const response = await fetch(`/api/analytics?period=${period}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(await readError(response));
+        return await response.json() as AnalyticsData;
+      }, 15_000);
+      setAnalytics(result);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Gagal memuat analytics."); }
     finally { setAnalyticsBusy(false); }
   }
 
   async function loadHistory(page = 1) {
+    if (!user) return;
     setHistoryBusy(true); setMessage("");
     try {
       const query = new URLSearchParams({ page: String(page), status: historyStatus });
       if (historyFrom) query.set("from", historyFrom);
       if (historyTo) query.set("to", historyTo);
-      const response = await fetch(`/api/activity-history?${query.toString()}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(await readError(response));
-      setHistory(await response.json() as HistoryData);
+      const queryString = query.toString();
+      const result = await fetchCached<HistoryData>(`user:${user.id}:history:${queryString}`, async () => {
+        const response = await fetch(`/api/activity-history?${queryString}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(await readError(response));
+        return await response.json() as HistoryData;
+      }, 10_000);
+      setHistory(result);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Gagal memuat riwayat aktivitas."); }
     finally { setHistoryBusy(false); }
   }
